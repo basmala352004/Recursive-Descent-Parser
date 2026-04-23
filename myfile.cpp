@@ -11,4 +11,23 @@
 // base   -> '(' expr ')' | id
 // id     -> any single lowercase letter (x, y, z, e, a, b, ...)
 
-#include "myfile.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+using namespace std;
+
+
+//Scanner
+
+
+//Parser
+
+
+//Print
+
+
+//Main
+int main() {
+
+    return 0;
+}
