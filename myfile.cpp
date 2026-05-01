@@ -13,11 +13,11 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 using namespace std;
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Input
+
 const char* g_input;
 int g_pos;
 
@@ -39,6 +39,7 @@ struct CompilerInfo
 };
 
 ////////////////////////////////////////////////////////////////////////////////////
+// Scanner
 
 enum TokenType
 {
@@ -101,7 +102,7 @@ void GetNextToken(CompilerInfo* pci, Token* ptoken)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
-//Parser
+// Parser
 
 enum NodeKind
 {
@@ -123,8 +124,8 @@ struct TreeNode
     TreeNode()
     {
         int i;
-        for(i = 0;i < MAX_CHILDREN;i++) child[i] = 0;
-        id = 0;
+        for(i=0;i<MAX_CHILDREN;i++) child[i]=0;
+        id=0;
     }
 };
 
@@ -135,62 +136,61 @@ struct ParseInfo
 
 void Match(CompilerInfo* pci, ParseInfo* ppi, TokenType expected_type)
 {
-    if (ppi->next_token.type != expected_type) throw 0;
+    if(ppi->next_token.type!=expected_type) throw 0;
     GetNextToken(pci, &ppi->next_token);
 }
 
 TreeNode* Expr(CompilerInfo*, ParseInfo*);
 
-//base -> '(' expr ')' | id
+// base -> '(' expr ')' | id
 TreeNode* Base(CompilerInfo* pci, ParseInfo* ppi)
 {
-    TreeNode* tree = 0;
-    if (ppi->next_token.type == ID)
+    TreeNode* tree=0;
+    if(ppi->next_token.type==ID)
     {
-        tree = new TreeNode();
-        tree->node_kind = ID_NODE;
-        tree->id = ppi->next_token.ch;
+        tree=new TreeNode();
+        tree->node_kind=ID_NODE;
+        tree->id=ppi->next_token.ch;
         Match(pci, ppi, ID);
         return tree;
     }
-    if (ppi->next_token.type == LEFT_PAREN)
+    if(ppi->next_token.type==LEFT_PAREN)
     {
         Match(pci, ppi, LEFT_PAREN);
-        tree = Expr(pci, ppi);
+        tree=Expr(pci, ppi);
         Match(pci, ppi, RIGHT_PAREN);
         return tree;
     }
     throw 0;
-    return 0;
 }
 
-//factor -> base [ '^-1' ]  inverse is right binding and optional
+// factor -> base [ '^-1' ]     inverse is right binding and optional
 TreeNode* Factor(CompilerInfo* pci, ParseInfo* ppi)
 {
-    TreeNode* tree = Base(pci, ppi);
-    if (ppi->next_token.type == INVERSE)
+    TreeNode* tree=Base(pci, ppi);
+    if(ppi->next_token.type==INVERSE)
     {
-        TreeNode* inv_tree = new TreeNode;
-        inv_tree->node_kind = INVERSE_NODE;
-        inv_tree->child[0] = tree;
+        TreeNode* inv_tree=new TreeNode;
+        inv_tree->node_kind=INVERSE_NODE;
+        inv_tree->child[0]=tree;
         Match(pci, ppi, INVERSE);
         return inv_tree;
     }
     return tree;
 }
 
-//expr -> factor { '.' factor } left associative
+// expr -> factor { '.' factor }     left associative
 TreeNode* Expr(CompilerInfo* pci, ParseInfo* ppi)
 {
-    TreeNode* tree = Factor(pci, ppi);
-    while (ppi->next_token.type == PRODUCT)
+    TreeNode* tree=Factor(pci, ppi);
+    while(ppi->next_token.type==PRODUCT)
     {
-        TreeNode* prod_tree = new TreeNode();
-        prod_tree->node_kind = PRODUCT_NODE;
-        prod_tree->child[0] = tree;
+        TreeNode* prod_tree=new TreeNode();
+        prod_tree->node_kind=PRODUCT_NODE;
+        prod_tree->child[0]=tree;
         Match(pci, ppi, PRODUCT);
-        prod_tree->child[1] = Factor(pci, ppi);
-        tree = prod_tree;
+        prod_tree->child[1]=Factor(pci, ppi);
+        tree=prod_tree;
     }
     return tree;
 }
@@ -199,21 +199,82 @@ TreeNode* Parse(CompilerInfo* pci)
 {
     ParseInfo parse_info;
     GetNextToken(pci, &parse_info.next_token);
-    TreeNode* syntax_tree = Expr(pci, &parse_info);
-    if (parse_info.next_token.type != ENDFILE)
-        printf("Error: expression ends before file ends :(");
+    TreeNode* syntax_tree=Expr(pci, &parse_info);
+    if(parse_info.next_token.type!=ENDFILE)
+        printf("Error: expression ends before file ends\n");
     return syntax_tree;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Print
 
+void PrintTree(TreeNode* tree, int level)
+{
+    if(!tree) return;
+
+    int i;
+    for(i=0;i<level;i++) printf("   ");
+
+    if(level>0) printf("|--");
+
+    if(tree->node_kind==PRODUCT_NODE) printf("product\n");
+    else if(tree->node_kind==INVERSE_NODE) printf("inverse\n");
+    else printf("%c\n", tree->id);
+
+    for(i=0;i<MAX_CHILDREN;i++) PrintTree(tree->child[i], level+1);
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// Destroy
+
+void DestroyTree(TreeNode* tree)
+{
+    if(!tree) return;
+
+    int i;
+    for(i=0;i<MAX_CHILDREN;i++) DestroyTree(tree->child[i]);
+
+    delete tree;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Main
 
 int main()
 {
-
+    //g_input="((x.y^-1).z)^-1";
+    //g_input="((a.b)^-1.(b.c)^-1.(c.a)^-1)^-1";
+    //g_input="(x^-1.(x.y))^-1.z";
+    //g_input="((a.b).(c.d))^-1.((d.c).(b.a))";
+    //g_input="(x.(y.(z.x^-1)^-1)^-1)^-1";
+    //g_input="((a^-1.b)^-1.(b^-1.c)^-1.(c^-1.a)^-1)^-1";
+    //g_input="(x.y^-1.z)^-1.(z^-1.y.x^-1)";
+    //g_input="((a.b^-1).(b.c^-1).(c.a^-1))^-1";
+    //g_input="(x^-1.(y^-1.(z^-1.x)^-1)^-1)^-1";
+    //g_input="((a.b)^-1.c^-1).((c.b^-1).a^-1)^-1";
+    //g_input="(x.(y.z^-1)^-1)^-1.(z.(y^-1.x^-1)^-1)";
+    //g_input="((a^-1.b^-1)^-1.(b^-1.c^-1)^-1)^-1.c";
+    //g_input="(x^-1.y)^-1.(y^-1.z)^-1.(z^-1.x)^-1";
+    //g_input="((a.b.c)^-1.(c.b.a)^-1)^-1";
+    //g_input="(x.(y.(z.(x.y)^-1)^-1)^-1)^-1";
+    //g_input="((a^-1.(b.c)^-1)^-1.((a.b)^-1.c^-1)^-1)^-1";
+    //g_input="(x^-1.y^-1.z^-1)^-1.(z.y.x)^-1";
+    //g_input="((a.b^-1.c)^-1.(c^-1.b.a^-1)^-1)^-1";
+    //g_input="(x.(y^-1.(z.x^-1)^-1.(x.z^-1)^-1).y)^-1";
+    //g_input="((a^-1.b).(b^-1.c).(c^-1.a))^-1.((a^-1.c).(c^-1.b).(b^-1.a))^-1";
+    g_pos=0;
+    CompilerInfo compiler;
+    TreeNode* tree=0;
+    try
+    {
+        tree=Parse(&compiler);
+        printf("Parse Tree:\n");
+        PrintTree(tree, 0);
+    }
+    catch(...)
+    {
+        printf("Parse Error\n");
+    }
+    DestroyTree(tree);
+    return 0;
 }
-
-////////////////////////////////////////////////////////////////////////////////////////
