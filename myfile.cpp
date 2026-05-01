@@ -1,4 +1,4 @@
-// Names:                IDs:
+﻿// Names:                IDs:
 // ----------------------------
 // Basmala Khalifa       20226122
 // Amira Emad            20226017
@@ -17,25 +17,52 @@
 using namespace std;
 
 ////////////////////////////////////////////////////////////////////////////////////
-// Input
-const char* g_input;
-int g_pos;
 
-char GetNextChar()
+struct InFile
 {
-    if(g_input[g_pos]==0) return 0;
-    return g_input[g_pos++];
-}
+    FILE* file;
 
-char PeekNextChar()
+    InFile(const char* str) {file=fopen(str, "r");}
+    ~InFile() {if(file) fclose(file);}
+
+    char GetNextChar()
+    {
+        int ch=fgetc(file);
+        if(ch==EOF) return 0;
+        return ch;
+    }
+
+    char PeekNextChar()
+    {
+        int ch=fgetc(file);
+        if(ch==EOF) return 0;
+        ungetc(ch, file);
+        return ch;
+    }
+};
+
+struct OutFile
 {
-    if(g_input[g_pos]==0) return 0;
-    return g_input[g_pos];
-}
+    FILE* file;
+
+    OutFile(const char* str) {file=0; if(str) file=fopen(str, "w");}
+    ~OutFile() {if(file) fclose(file);}
+
+    void Out(const char* s)
+    {
+        fprintf(file, "%s\n", s); fflush(file);
+    }
+};
 
 struct CompilerInfo
 {
-    const char* input;
+    InFile in_file;
+    OutFile out_file;
+
+    CompilerInfo(const char* in_str, const char* out_str)
+                : in_file(in_str), out_file(out_str)
+    {
+    }
 };
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -72,7 +99,7 @@ void GetNextToken(CompilerInfo* pci, Token* ptoken)
     ptoken->type=ERROR;
     ptoken->ch=0;
 
-    char ch=GetNextChar();
+    char ch=pci->in_file.GetNextChar();
 
     if(ch==0) {ptoken->type=ENDFILE; return;}
 
@@ -89,8 +116,8 @@ void GetNextToken(CompilerInfo* pci, Token* ptoken)
 
     if(ch=='^')
     {
-        char c2=GetNextChar();
-        char c3=GetNextChar();
+        char c2=pci->in_file.GetNextChar();
+        char c3=pci->in_file.GetNextChar();
         if(c2=='-' && c3=='1') {ptoken->type=INVERSE; ptoken->ch=0; return;}
         ptoken->type=ERROR; ptoken->ch=ch; return;
     }
@@ -210,10 +237,9 @@ TreeNode* Parse(CompilerInfo* pci)
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Main
-
 int main()
 {
-
+    return 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
