@@ -13,7 +13,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-using namespace std;
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Input
@@ -25,12 +24,6 @@ char GetNextChar()
 {
     if(g_input[g_pos]==0) return 0;
     return g_input[g_pos++];
-}
-
-char PeekNextChar()
-{
-    if(g_input[g_pos]==0) return 0;
-    return g_input[g_pos];
 }
 
 struct CompilerInfo
@@ -238,12 +231,62 @@ void DestroyTree(TreeNode* tree)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
+// Tree To Expression
+
+void BuildExpr(TreeNode* node, char* buf, int* pos)
+{
+    if(!node) return;
+    if(node->node_kind==ID_NODE)
+    {
+        buf[(*pos)++]=node->id;
+        buf[*pos]=0;
+        return;
+    }
+    if(node->node_kind==INVERSE_NODE)
+    {
+        int needs_parens=0;
+        if(node->child[0] && node->child[0]->node_kind==PRODUCT_NODE)
+            needs_parens=1;
+        if(needs_parens) buf[(*pos)++]='(';
+        BuildExpr(node->child[0], buf, pos);
+        if(needs_parens) buf[(*pos)++]=')';
+        buf[(*pos)++]='^';
+        buf[(*pos)++]='-';
+        buf[(*pos)++]='1';
+        buf[*pos]=0;
+        return;
+    }
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        int right_needs_parens=0;
+        if(node->child[1] && node->child[1]->node_kind==PRODUCT_NODE)
+            right_needs_parens=1;
+        BuildExpr(node->child[0], buf, pos);
+        buf[(*pos)++]='.';
+        if(right_needs_parens) buf[(*pos)++]='(';
+        BuildExpr(node->child[1], buf, pos);
+        if(right_needs_parens) buf[(*pos)++]=')';
+        buf[*pos]=0;
+        return;
+    }
+}
+
+void PrintExpr(TreeNode* node)
+{
+    char buf[512];
+    int pos=0;
+    buf[0]=0;
+    BuildExpr(node, buf, &pos);
+    printf("%s\n", buf);
+}
+
+////////////////////////////////////////////////////////////////////////////////////
 // Main
 
 int main()
 {
     //g_input="((x.y^-1).z)^-1";
-    //g_input="((a.b)^-1.(b.c)^-1.(c.a)^-1)^-1";
+    //g_input="({a.b}^-1.(b.c)^-1.(c.a)^-1)^-1";
     //g_input="(x^-1.(x.y))^-1.z";
     //g_input="((a.b).(c.d))^-1.((d.c).(b.a))";
     //g_input="(x.(y.(z.x^-1)^-1)^-1)^-1";
@@ -270,6 +313,9 @@ int main()
         tree=Parse(&compiler);
         printf("Parse Tree:\n");
         PrintTree(tree, 0);
+        PrintExpr(tree);
+        printf("---------------------------------\n");
+        fflush(NULL);
     }
     catch(...)
     {
