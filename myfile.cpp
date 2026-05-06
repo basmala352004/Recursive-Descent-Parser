@@ -11,6 +11,11 @@
 // base   -> '(' expr ')' | id
 // id     -> any single lowercase letter (x, y, z, e, a, b, ...)
 
+// Reduction Rules (from page 460):
+// ----------------------------
+// Rule 1: x^-1^-1 -> x             (double inverse cancels out)
+// Rule 2: (x.y)^-1 -> y^-1 . x^-1 (inverse of product flips order)
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -281,12 +286,137 @@ void PrintExpr(TreeNode* node)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
+// Reduction Rules TAKE CARE ANA 3MALT EL KETAB REFERENCE
+
+// Helper: creates a new inverse node wrapping the given child
+TreeNode* MakeInverse(TreeNode* child)
+{
+    TreeNode* node=new TreeNode();
+    node->node_kind=INVERSE_NODE;
+    node->child[0]=child;
+    return node;
+}
+
+// Helper: creates a new product node with left and right children
+TreeNode* MakeProduct(TreeNode* left, TreeNode* right)
+{
+    TreeNode* node=new TreeNode();
+    node->node_kind=PRODUCT_NODE;
+    node->child[0]=left;
+    node->child[1]=right;
+    return node;
+}
+
+// Rule 1: x^-1^-1 -> x
+// If we see inverse( inverse(x) ), we just return x and free the two wrapper nodes
+TreeNode* ReduceDoubleInverse(TreeNode* node)
+{
+    // Check: is this node an inverse whose child is also an inverse?
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==INVERSE_NODE)
+        {
+            // Yes! x^-1^-1 found. Pull out the inner child (x) and free wrappers.
+            TreeNode* inner=node->child[0]->child[0];
+            node->child[0]->child[0]=0; // disconnect so DestroyTree doesn't touch inner
+            DestroyTree(node->child[0]);
+            node->child[0]=0;
+            DestroyTree(node);
+            return inner;  // return x directly
+        }
+    }
+    return node; // no match, return unchanged
+}
+
+// Rule 2: (x.y)^-1 -> y^-1 . x^-1
+// If we see inverse( product(x, y) ), replace with product( inverse(y), inverse(x) )
+TreeNode* ReduceProductInverse(TreeNode* node)
+{
+    // Check: is this node an inverse whose child is a product?
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==PRODUCT_NODE)
+        {
+            // Yes! (x.y)^-1 found. Extract x and y from the product.
+            TreeNode* x=node->child[0]->child[0];
+            TreeNode* y=node->child[0]->child[1];
+
+            // Disconnect children so DestroyTree does not free them
+            node->child[0]->child[0]=0;
+            node->child[0]->child[1]=0;
+            node->child[0]=0;
+            DestroyTree(node);
+
+            // Build: y^-1 . x^-1
+            TreeNode* inv_y=MakeInverse(y);
+            TreeNode* inv_x=MakeInverse(x);
+            return MakeProduct(inv_y, inv_x);
+        }
+    }
+    return node; // no match, return unchanged
+}
+
+// ApplyOnce: walks the whole tree once.
+// At each node, tries to apply a reduction rule.
+// If a rule fires, sets *changed=1 so the caller knows to keep looping.
+// Returns the (possibly new) root of the subtree.
+TreeNode* ApplyOnce(TreeNode* node, int* changed)
+{
+    if(!node) return 0;
+
+    // First recurse into children so we reduce bottom-up
+    int i;
+    for(i=0;i<MAX_CHILDREN;i++)
+        node->child[i]=ApplyOnce(node->child[i], changed);
+
+    // Try Rule 1: x^-1^-1 -> x
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==INVERSE_NODE)
+        {
+            *changed=1;
+            return ReduceDoubleInverse(node);
+        }
+    }
+
+    // Try Rule 2: (x.y)^-1 -> y^-1 . x^-1
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==PRODUCT_NODE)
+        {
+            *changed=1;
+            return ReduceProductInverse(node);
+        }
+    }
+
+    return node; // nothing matched, return unchanged
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+// ReduceAll
+
+void ReduceAll(TreeNode** root)
+{
+    int changed=1;
+    while(changed)
+    {
+        changed=0;
+        *root=ApplyOnce(*root, &changed);
+        if(changed)
+        {
+            PrintTree(*root, 0);
+            PrintExpr(*root);
+            printf("\n");
+            fflush(NULL);
+        }
+    }
+}
+////////////////////////////////////////////////////////////////////////////////////
 // Main
 
 int main()
 {
-    //g_input="((x.y^-1).z)^-1";
-    //g_input="({a.b}^-1.(b.c)^-1.(c.a)^-1)^-1";
+    g_input="((x.y^-1).z)^-1";
     //g_input="(x^-1.(x.y))^-1.z";
     //g_input="((a.b).(c.d))^-1.((d.c).(b.a))";
     //g_input="(x.(y.(z.x^-1)^-1)^-1)^-1";
@@ -312,6 +442,14 @@ int main()
     {
         tree=Parse(&compiler);
         printf("Parse Tree:\n");
+        PrintTree(tree, 0);
+        PrintExpr(tree);
+        printf("\n");
+        fflush(NULL);
+
+        ReduceAll(&tree);
+
+        printf("Final normal form:\n");
         PrintTree(tree, 0);
         PrintExpr(tree);
         printf("---------------------------------\n");
