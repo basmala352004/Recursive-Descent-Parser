@@ -8,13 +8,21 @@
 // ----------------------------
 // expr   -> factor { '.' factor }      left associative (product)
 // factor -> base [ '^' '-' '1' ]       inverse (right binding, optional)
-// base   -> '(' expr ')' | id
-// id     -> any single lowercase letter (x, y, z, e, a, b, ...)
+// base   -> '(' expr ')' | 'e' | id
+// id     -> any single lowercase letter except e (x, y, z, a, b, ...)
 
 // Reduction Rules (from page 460):
 // ----------------------------
-// Rule 1: x^-1^-1 -> x             (double inverse cancels out)
-// Rule 2: (x.y)^-1 -> y^-1 . x^-1 (inverse of product flips order)
+// Rule 1: e . x   -> x             (left identity)
+// Rule 2: x . e   -> x             (right identity)
+// Rule 3: x^-1 . x -> e            (left inverse cancels to identity)
+// Rule 4: x . x^-1 -> e            (right inverse cancels to identity)
+// Rule 5: e^-1    -> e             (inverse of identity is identity)
+// Rule 6: x^-1^-1 -> x             (double inverse cancels out)
+// Rule 7: y^-1 . (y . z) -> z      (left cancel)
+// Rule 8: y . (y^-1 . z) -> z      (right cancel)
+// Rule 9: (x . y) . z -> x.(y.z)   (associativity)
+// Rule 10:(x . y)^-1 -> y^-1.x^-1  (inverse of product flips order)
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,12 +49,12 @@ struct CompilerInfo
 
 enum TokenType
 {
-    ID, PRODUCT, INVERSE, LEFT_PAREN, RIGHT_PAREN, ENDFILE, ERROR
+    ID, PRODUCT, INVERSE, LEFT_PAREN, RIGHT_PAREN, IDENTITY, ENDFILE, ERROR
 };
 
 const char* TokenTypeStr[]=
 {
-    "ID", "PRODUCT", "INVERSE", "LEFT_PAREN", "RIGHT_PAREN", "ENDFILE", "ERROR"
+    "ID", "PRODUCT", "INVERSE", "LEFT_PAREN", "RIGHT_PAREN", "IDENTITY", "ENDFILE", "ERROR"
 };
 
 struct Token
@@ -94,6 +102,9 @@ void GetNextToken(CompilerInfo* pci, Token* ptoken)
         ptoken->type=ERROR; ptoken->ch=ch; return;
     }
 
+    // 'e' is the identity element, treated specially
+    if(ch=='e') {ptoken->type=IDENTITY; ptoken->ch=ch; return;}
+
     if(ch>='a' && ch<='z') {ptoken->type=ID; ptoken->ch=ch; return;}
 
     ptoken->type=ERROR; ptoken->ch=ch;
@@ -104,12 +115,12 @@ void GetNextToken(CompilerInfo* pci, Token* ptoken)
 
 enum NodeKind
 {
-    PRODUCT_NODE, INVERSE_NODE, ID_NODE
+    PRODUCT_NODE, INVERSE_NODE, ID_NODE, IDENTITY_NODE
 };
 
 const char* NodeKindStr[]=
 {
-    "product", "inverse", "ID"
+    "product", "inverse", "ID", "identity"
 };
 
 #define MAX_CHILDREN 2
@@ -140,10 +151,21 @@ void Match(CompilerInfo* pci, ParseInfo* ppi, TokenType expected_type)
 
 TreeNode* Expr(CompilerInfo*, ParseInfo*);
 
-// base -> '(' expr ')' | id
+// base -> '(' expr ')' | 'e' | id
 TreeNode* Base(CompilerInfo* pci, ParseInfo* ppi)
 {
     TreeNode* tree=0;
+
+    // identity element 'e'
+    if(ppi->next_token.type==IDENTITY)
+    {
+        tree=new TreeNode();
+        tree->node_kind=IDENTITY_NODE;
+        tree->id='e';
+        Match(pci, ppi, IDENTITY);
+        return tree;
+    }
+
     if(ppi->next_token.type==ID)
     {
         tree=new TreeNode();
@@ -152,6 +174,7 @@ TreeNode* Base(CompilerInfo* pci, ParseInfo* ppi)
         Match(pci, ppi, ID);
         return tree;
     }
+
     if(ppi->next_token.type==LEFT_PAREN)
     {
         Match(pci, ppi, LEFT_PAREN);
@@ -159,6 +182,7 @@ TreeNode* Base(CompilerInfo* pci, ParseInfo* ppi)
         Match(pci, ppi, RIGHT_PAREN);
         return tree;
     }
+
     throw 0;
 }
 
@@ -215,9 +239,10 @@ void PrintTree(TreeNode* tree, int level)
 
     if(level>0) printf("|--");
 
-    if(tree->node_kind==PRODUCT_NODE) printf("product\n");
-    else if(tree->node_kind==INVERSE_NODE) printf("inverse\n");
-    else printf("%c\n", tree->id);
+    if(tree->node_kind==PRODUCT_NODE)       printf("product\n");
+    else if(tree->node_kind==INVERSE_NODE)  printf("inverse\n");
+    else if(tree->node_kind==IDENTITY_NODE) printf("e\n");
+    else                                    printf("%c\n", tree->id);
 
     for(i=0;i<MAX_CHILDREN;i++) PrintTree(tree->child[i], level+1);
 }
@@ -241,12 +266,21 @@ void DestroyTree(TreeNode* tree)
 void BuildExpr(TreeNode* node, char* buf, int* pos)
 {
     if(!node) return;
+
+    if(node->node_kind==IDENTITY_NODE)
+    {
+        buf[(*pos)++]='e';
+        buf[*pos]=0;
+        return;
+    }
+
     if(node->node_kind==ID_NODE)
     {
         buf[(*pos)++]=node->id;
         buf[*pos]=0;
         return;
     }
+
     if(node->node_kind==INVERSE_NODE)
     {
         int needs_parens=0;
@@ -261,6 +295,7 @@ void BuildExpr(TreeNode* node, char* buf, int* pos)
         buf[*pos]=0;
         return;
     }
+
     if(node->node_kind==PRODUCT_NODE)
     {
         int right_needs_parens=0;
@@ -286,7 +321,15 @@ void PrintExpr(TreeNode* node)
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
-// Reduction Rules
+// Helpers
+
+TreeNode* MakeIdentity()
+{
+    TreeNode* node=new TreeNode();
+    node->node_kind=IDENTITY_NODE;
+    node->id='e';
+    return node;
+}
 
 TreeNode* MakeInverse(TreeNode* child)
 {
@@ -305,6 +348,105 @@ TreeNode* MakeProduct(TreeNode* left, TreeNode* right)
     return node;
 }
 
+////////////////////////////////////////////////////////////////////////////////////
+// Reduction Rules
+
+// Rule: e^-1 -> e
+TreeNode* ReduceIdentityInverse(TreeNode* node)
+{
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==IDENTITY_NODE)
+        {
+            node->child[0]=0;
+            DestroyTree(node);
+            return MakeIdentity();
+        }
+    }
+    return node;
+}
+
+// Rule: e . x -> x
+TreeNode* ReduceIdentityLeft(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==IDENTITY_NODE)
+        {
+            TreeNode* right=node->child[1];
+            node->child[1]=0;
+            DestroyTree(node);
+            return right;
+        }
+    }
+    return node;
+}
+
+// Rule: x . e -> x
+TreeNode* ReduceIdentityRight(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[1] && node->child[1]->node_kind==IDENTITY_NODE)
+        {
+            TreeNode* left=node->child[0];
+            node->child[0]=0;
+            DestroyTree(node);
+            return left;
+        }
+    }
+    return node;
+}
+
+// Rule: x^-1 . x -> e
+TreeNode* ReduceInverseLeftToIdentity(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        TreeNode* left =node->child[0];
+        TreeNode* right=node->child[1];
+        if(left && left->node_kind==INVERSE_NODE)
+        {
+            TreeNode* y=left->child[0];
+            if(y && right &&
+               y->node_kind==ID_NODE && right->node_kind==ID_NODE &&
+               y->id==right->id)
+            {
+                node->child[0]=0;
+                node->child[1]=0;
+                DestroyTree(node);
+                return MakeIdentity();
+            }
+        }
+    }
+    return node;
+}
+
+// Rule: x . x^-1 -> e
+TreeNode* ReduceInverseRightToIdentity(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        TreeNode* left =node->child[0];
+        TreeNode* right=node->child[1];
+        if(right && right->node_kind==INVERSE_NODE)
+        {
+            TreeNode* y=right->child[0];
+            if(y && left &&
+               y->node_kind==ID_NODE && left->node_kind==ID_NODE &&
+               y->id==left->id)
+            {
+                node->child[0]=0;
+                node->child[1]=0;
+                DestroyTree(node);
+                return MakeIdentity();
+            }
+        }
+    }
+    return node;
+}
+
+// Rule: x^-1^-1 -> x
 TreeNode* ReduceDoubleInverse(TreeNode* node)
 {
     if(node->node_kind==INVERSE_NODE)
@@ -322,6 +464,94 @@ TreeNode* ReduceDoubleInverse(TreeNode* node)
     return node;
 }
 
+// Rule: y^-1 . (y . z) -> z
+TreeNode* ReduceInverseLeftCancel(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        TreeNode* left =node->child[0];
+        TreeNode* right=node->child[1];
+        if(left && left->node_kind==INVERSE_NODE &&
+           right && right->node_kind==PRODUCT_NODE)
+        {
+            TreeNode* y =left->child[0];
+            TreeNode* ry=right->child[0];
+            TreeNode* z =right->child[1];
+            if(y && ry && y->node_kind==ID_NODE && ry->node_kind==ID_NODE && y->id==ry->id)
+            {
+                right->child[1]=0;
+                left->child[0]=0;
+                right->child[0]=0;
+                node->child[0]=0;
+                node->child[1]=0;
+                DestroyTree(left);
+                DestroyTree(right);
+                DestroyTree(node);
+                return z;
+            }
+        }
+    }
+    return node;
+}
+
+// Rule: y . (y^-1 . z) -> z
+TreeNode* ReduceInverseRightCancel(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        TreeNode* left =node->child[0];
+        TreeNode* right=node->child[1];
+        if(left && right && right->node_kind==PRODUCT_NODE)
+        {
+            TreeNode* rl=right->child[0];
+            TreeNode* z =right->child[1];
+            if(rl && rl->node_kind==INVERSE_NODE)
+            {
+                TreeNode* y2=rl->child[0];
+                if(left->node_kind==ID_NODE && y2 && y2->node_kind==ID_NODE && left->id==y2->id)
+                {
+                    right->child[1]=0;
+                    rl->child[0]=0;
+                    right->child[0]=0;
+                    node->child[0]=0;
+                    node->child[1]=0;
+                    DestroyTree(left);
+                    DestroyTree(right);
+                    DestroyTree(node);
+                    return z;
+                }
+            }
+        }
+    }
+    return node;
+}
+
+// Rule: (x . y) . z -> x . (y . z)
+TreeNode* ReduceAssociativity(TreeNode* node)
+{
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        TreeNode* left =node->child[0];
+        TreeNode* right=node->child[1];
+        if(left && left->node_kind==PRODUCT_NODE)
+        {
+            TreeNode* x=left->child[0];
+            TreeNode* y=left->child[1];
+
+            left->child[0]=0;
+            left->child[1]=0;
+            node->child[0]=0;
+            node->child[1]=0;
+            DestroyTree(left);
+            DestroyTree(node);
+
+            return MakeProduct(x, MakeProduct(y, right));
+        }
+    }
+    return node;
+}
+
+// Rule: (x . y)^-1 -> y^-1 . x^-1
 TreeNode* ReduceProductInverse(TreeNode* node)
 {
     if(node->node_kind==INVERSE_NODE)
@@ -344,6 +574,9 @@ TreeNode* ReduceProductInverse(TreeNode* node)
     return node;
 }
 
+////////////////////////////////////////////////////////////////////////////////////
+// ApplyOnce
+
 TreeNode* ApplyOnce(TreeNode* node, int* changed)
 {
     if(!node) return 0;
@@ -352,6 +585,67 @@ TreeNode* ApplyOnce(TreeNode* node, int* changed)
     for(i=0;i<MAX_CHILDREN;i++)
         node->child[i]=ApplyOnce(node->child[i], changed);
 
+    // Rule: e^-1 -> e
+    if(node->node_kind==INVERSE_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==IDENTITY_NODE)
+        {
+            *changed=1;
+            return ReduceIdentityInverse(node);
+        }
+    }
+
+    // Rule: e . x -> x
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==IDENTITY_NODE)
+        {
+            *changed=1;
+            return ReduceIdentityLeft(node);
+        }
+    }
+
+    // Rule: x . e -> x
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[1] && node->child[1]->node_kind==IDENTITY_NODE)
+        {
+            *changed=1;
+            return ReduceIdentityRight(node);
+        }
+    }
+
+    // Rule: x^-1 . x -> e
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==INVERSE_NODE)
+        {
+            TreeNode* y    =node->child[0]->child[0];
+            TreeNode* right=node->child[1];
+            if(y && right && y->node_kind==ID_NODE && right->node_kind==ID_NODE && y->id==right->id)
+            {
+                *changed=1;
+                return ReduceInverseLeftToIdentity(node);
+            }
+        }
+    }
+
+    // Rule: x . x^-1 -> e
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[1] && node->child[1]->node_kind==INVERSE_NODE)
+        {
+            TreeNode* y   =node->child[1]->child[0];
+            TreeNode* left=node->child[0];
+            if(y && left && y->node_kind==ID_NODE && left->node_kind==ID_NODE && y->id==left->id)
+            {
+                *changed=1;
+                return ReduceInverseRightToIdentity(node);
+            }
+        }
+    }
+
+    // Rule: x^-1^-1 -> x
     if(node->node_kind==INVERSE_NODE)
     {
         if(node->child[0] && node->child[0]->node_kind==INVERSE_NODE)
@@ -361,12 +655,58 @@ TreeNode* ApplyOnce(TreeNode* node, int* changed)
         }
     }
 
+    // Rule: (x.y)^-1 -> y^-1 . x^-1
     if(node->node_kind==INVERSE_NODE)
     {
         if(node->child[0] && node->child[0]->node_kind==PRODUCT_NODE)
         {
             *changed=1;
             return ReduceProductInverse(node);
+        }
+    }
+
+    // Rule: y^-1 . (y . z) -> z
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==INVERSE_NODE &&
+           node->child[1] && node->child[1]->node_kind==PRODUCT_NODE)
+        {
+            TreeNode* y =node->child[0]->child[0];
+            TreeNode* ry=node->child[1]->child[0];
+            if(y && ry && y->node_kind==ID_NODE && ry->node_kind==ID_NODE && y->id==ry->id)
+            {
+                *changed=1;
+                return ReduceInverseLeftCancel(node);
+            }
+        }
+    }
+
+    // Rule: y . (y^-1 . z) -> z
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[1] && node->child[1]->node_kind==PRODUCT_NODE)
+        {
+            TreeNode* rl=node->child[1]->child[0];
+            if(rl && rl->node_kind==INVERSE_NODE)
+            {
+                TreeNode* y =node->child[0];
+                TreeNode* y2=rl->child[0];
+                if(y->node_kind==ID_NODE && y2 && y2->node_kind==ID_NODE && y->id==y2->id)
+                {
+                    *changed=1;
+                    return ReduceInverseRightCancel(node);
+                }
+            }
+        }
+    }
+
+    // Rule: (x . y) . z -> x . (y . z)
+    if(node->node_kind==PRODUCT_NODE)
+    {
+        if(node->child[0] && node->child[0]->node_kind==PRODUCT_NODE)
+        {
+            *changed=1;
+            return ReduceAssociativity(node);
         }
     }
 
@@ -392,6 +732,7 @@ void ReduceAll(TreeNode** root)
         }
     }
 }
+
 ////////////////////////////////////////////////////////////////////////////////////
 // Main
 
@@ -416,6 +757,14 @@ int main()
     //g_input="((a.b^-1.c)^-1.(c^-1.b.a^-1)^-1)^-1";
     //g_input="(x.(y^-1.(z.x^-1)^-1.(x.z^-1)^-1).y)^-1";
     //g_input="((a^-1.b).(b^-1.c).(c^-1.a))^-1.((a^-1.c).(c^-1.b).(b^-1.a))^-1";
+    // identity test cases:
+    //g_input="e.x";
+    //g_input="x.e";
+    //g_input="e^-1";
+    //g_input="x^-1.x";
+    //g_input="x.x^-1";
+    //g_input="(x.e).y^-1";
+    //g_input="e.(x.x^-1)";
     g_pos=0;
     CompilerInfo compiler;
     TreeNode* tree=0;
